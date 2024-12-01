@@ -2,7 +2,7 @@ import logging
 import os
 import yfinance as yf
 from datetime import datetime
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -21,32 +21,101 @@ logging.basicConfig(
 )
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
-BUTTONS = range(1)
-
-
-def about_company(ticker):
-    return ticker.info["longBusinessSummary"]
+y, BUTTONS = range(2)
+x, ABOUT, DVD, MOMENTUM, NEWS, DONE = range(6)
 
 
-def momentum(ticker):
-    hist_1mo = ticker.history(period="1mo").iloc[0]["Open"].round(2)
-    hist_3mo = ticker.history(period="3mo").iloc[0]["Open"].round(2)
-    hist_6mo = ticker.history(period="6mo").iloc[0]["Open"].round(2)
-    hist_12mo = ticker.history(period="1y").iloc[0]["Open"].round(2)
-    hist_YTD = ticker.history(period="ytd").iloc[0]["Open"].round(2)
-    current_price = ticker.info["currentPrice"]
-    msg = f"""{ticker.info['longName']} momentum\n
-        1 month return: {((current_price / hist_1mo - 1) * 100).round(2)}%\n
-        3 months return: {((current_price / hist_3mo - 1) * 100).round(2)}%\n
-        6 months return: {((current_price / hist_6mo - 1) * 100).round(2)}%\n
-        12 months return: {((current_price / hist_12mo - 1) * 100).round(2)}%\n
-        YTD return: {((current_price / hist_YTD - 1) * 100).round(2)}%\n
-        """
-    return msg
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Type /t [ticker] to get info")
 
 
-def news_company(ticker):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays info on how to use the bot."""
+    await update.message.reply_text("Use /start to test this bot.")
+
+
+async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+    await context.bot.set_chat_menu_button()
+
+
+def build_keybord(symbol) -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(f"About ${symbol.upper()}", callback_data=str(ABOUT)),
+            InlineKeyboardButton(f"DVD ${symbol.upper()}", callback_data=str(DVD)),
+        ],
+        [
+            InlineKeyboardButton(f"News ${symbol.upper()}", callback_data=str(NEWS)),
+            InlineKeyboardButton(
+                f"Momentum ${symbol.upper()}", callback_data=str(MOMENTUM)
+            ),
+        ],
+        [InlineKeyboardButton("Done", callback_data=str(DONE))],
+    ]
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def about_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
+    # logger.info("query %s started the conversation.", symbol)
+    ticker = yf.Ticker(symbol)
+
+    await query.answer()
+
+    reply_markup = build_keybord(symbol)
+
+    await query.edit_message_text(
+        text=f"About {symbol}\n\n{ticker.info['longBusinessSummary']}",
+    )
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="About. Pick another one",
+        reply_markup=reply_markup,
+    )
+
+    return BUTTONS
+
+
+async def dvd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    # logger.info("query %s started the conversation.", update)
+    symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
+    ticker = yf.Ticker(symbol)
+    try:
+        dvd_value = ticker.info["lastDividendValue"]
+        now = datetime.fromtimestamp(ticker.info["lastDividendDate"])
+        formatted = now.strftime("%Y-%m-%d")
+
+        await query.answer()
+
+        await query.edit_message_text(
+            text=f"Last dvd: ${dvd_value}, {formatted}",
+        )
+    except:
+        await query.edit_message_text(
+            text="No DVD",
+        )
+
+    reply_markup = build_keybord(symbol)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Last DVD. Pick another",
+        reply_markup=reply_markup,
+    )
+
+    return BUTTONS
+
+
+async def news_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
+    ticker = yf.Ticker(symbol)
+
     msg = (
         f"News for {ticker.info['longName']}:\n\n"
         f"{ticker.news[0]['title']}\n"
@@ -61,53 +130,55 @@ def news_company(ticker):
         f"Time published: {datetime.fromtimestamp(ticker.news[2]['providerPublishTime'])}\n"
         f"Link: {ticker.news[2]['link']}"
     )
-    return msg
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Type /t [ticker] to get info")
-
-
-# await update.message.reply_text("Please choose:", reply_markup=reply_markup)
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays info on how to use the bot."""
-    await update.message.reply_text("Use /start to test this bot.")
-
-
-async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
-    await context.bot.set_chat_menu_button()
-
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Parses the CallbackQuery and updates the message text."""
-    query = update.callback_query
-
     await query.answer()
-    # await query.edit_message_text(text=f"Selected option: {query.data}")
-    ticker = yf.Ticker(query.data.split()[1])
 
-    if query.data.startswith("News"):
-        msg = news_company(ticker)
-        await query.edit_message_text(text=msg)
-    elif query.data.startswith("DVD"):
-        now = datetime.fromtimestamp(ticker.info["lastDividendDate"])
-        formatted = now.strftime("%Y-%m-%d")
-        await query.edit_message_text(
-            text=f"Last dvd: {ticker.info['lastDividendValue']}, {formatted}"
-        )
+    reply_markup = build_keybord(symbol)
 
-    elif query.data.startswith("About"):
-        await query.edit_message_text(text=about_company(ticker))
+    await query.edit_message_text(text=msg)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Company news. Pick another one",
+        reply_markup=reply_markup,
+    )
 
-    elif query.data.startswith("Momentum"):
-        msg = momentum(ticker)
-        await query.edit_message_text(text=msg)
+    return BUTTONS
 
 
-async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def momentum(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
+    ticker = yf.Ticker(symbol)
+
+    hist_1mo = ticker.history(period="1mo").iloc[0]["Open"].round(2)
+    hist_3mo = ticker.history(period="3mo").iloc[0]["Open"].round(2)
+    hist_6mo = ticker.history(period="6mo").iloc[0]["Open"].round(2)
+    hist_12mo = ticker.history(period="1y").iloc[0]["Open"].round(2)
+    hist_YTD = ticker.history(period="ytd").iloc[0]["Open"].round(2)
+    current_price = ticker.info["currentPrice"]
+    msg = f"""{ticker.info['longName']} momentum\n
+        1 month return: {((current_price / hist_1mo - 1) * 100).round(2)}%\n
+        3 months return: {((current_price / hist_3mo - 1) * 100).round(2)}%\n
+        6 months return: {((current_price / hist_6mo - 1) * 100).round(2)}%\n
+        12 months return: {((current_price / hist_12mo - 1) * 100).round(2)}%\n
+        YTD return: {((current_price / hist_YTD - 1) * 100).round(2)}%\n
+        50 day MA: ${ticker.info['fiftyDayAverage']}\n
+        200 day MA: ${ticker.info['twoHundredDayAverage']}\n
+        """
+    await query.answer()
+
+    reply_markup = build_keybord(symbol)
+
+    await query.edit_message_text(text=msg)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Momentum. Pick another one",
+        reply_markup=reply_markup,
+    )
+
+    return BUTTONS
+
+
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(text="See you next time!")
@@ -115,13 +186,11 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text=update.message.text
-    )
-
-
+# drukuje guziki /t
 async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    # logger.info("User %s started the conversation.", user.first_name)
+
     symbol = context.args[0]
     try:
         ticker = yf.Ticker(symbol.upper())
@@ -139,42 +208,42 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         Volume: {ticker.info['volume']:_}\n
         Average Volume: {ticker.info['averageVolume']:_}"""
 
-        keyboard = [
-            [
-                InlineKeyboardButton(f"News {symbol}", callback_data=f"News {symbol}"),
-                InlineKeyboardButton(f"DVD {symbol}", callback_data=f"DVD {symbol}"),
-            ],
-            [
-                InlineKeyboardButton(
-                    f"About {symbol}", callback_data=f"About {symbol}"
-                ),
-                InlineKeyboardButton(
-                    f"Momentum {symbol}", callback_data=f"Momentum {symbol}"
-                ),
-            ],
-            [InlineKeyboardButton("Done", callback_data="Done")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(basic_info, reply_markup=reply_markup)
+        reply_markup = build_keybord(symbol)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, text=basic_info
+        )
+
+        await update.message.reply_text(
+            text="Basic info. Pick one", reply_markup=reply_markup
+        )
+
+        return BUTTONS
     except KeyError:
         await update.message.reply_text("ogarnij się!")
 
 
 def main() -> None:
-    """Run the bot."""
-
     application = Application.builder().token(os.getenv("TOKEN")).build()
 
     conv_handler = ConversationHandler(
         entry_points=[
-            application.add_handler(CommandHandler("start", start)),
-            application.add_handler(CommandHandler("help", help_command)),
-            application.add_handler(CommandHandler("t", ticker_command)),
+            CommandHandler("start", start),
+            CommandHandler("help", help_command),
+            CommandHandler("t", ticker_command),
         ],
-        states={BUTTONS: [CallbackQueryHandler]},
+        states={
+            BUTTONS: [
+                CallbackQueryHandler(about_company, pattern="^" + str(ABOUT) + "$"),
+                CallbackQueryHandler(dvd, pattern="^" + str(DVD) + "$"),
+                CallbackQueryHandler(news_company, pattern="^" + str(NEWS) + "$"),
+                CallbackQueryHandler(momentum, pattern="^" + str(MOMENTUM) + "$"),
+                CallbackQueryHandler(done, pattern="^" + str(DONE) + "$"),
+            ]
+        },
+        fallbacks=[CommandHandler("start", start)],
     )
     application.add_handler(conv_handler)
-    # application.add_handler(CallbackQueryHandler(button))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
