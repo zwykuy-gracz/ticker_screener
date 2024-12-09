@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 import yfinance as yf
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -26,14 +27,46 @@ logger = logging.getLogger(__name__)
 y, BUTTONS = range(2)
 x, ABOUT, DVD, MOMENTUM, NEWS, DONE = range(6)
 
+with open("selected_room.json", "r+") as f:
+    file_data = json.load(f)
+    rooms_ids_lst = []
+    for i in file_data["supergroup_thread_id"]:
+        rooms_ids_lst.append(list(i.items())[0][0])
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Type /t [ticker] to get info")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays info on how to use the bot."""
     await update.message.reply_text("Use /start to test this bot.")
+
+
+async def select_room(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_type = update.message.chat.type
+    if chat_type == "supergroup":
+        chat_id = update.message.chat.id
+        thread_id = update.message.message_thread_id
+
+        entry = {chat_id: thread_id}
+
+        with open("selected_room.json", "r+") as f:
+            file_data = json.load(f)
+            entry_key = list(entry.items())
+            rooms_ids_lst = []
+            for i in file_data["supergroup_thread_id"]:
+                rooms_ids_lst.append(list(i.items())[0][0])
+            if str(entry_key[0][0]) in rooms_ids_lst:
+                print("yesss", entry_key[0][0])
+            else:
+                print("nooo")
+                file_data["supergroup_thread_id"].append(entry)
+                f.seek(0)
+                json.dump(file_data, f, indent=4)
+
+        await update.message.reply_text("yes jap")
+    else:
+        await update.message.reply_text(chat_type)
 
 
 async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -188,8 +221,16 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # drukuje guziki /t
 async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    # logger.info("User %s started the conversation.", user.first_name)
+    # user = update.message.from_user
+    # logger.info(
+    #     "update.message.chat.id %s started the conversation.", update.message.chat.id
+    # )
+    # logger.info(
+    #     "update.message.message_thread_id %s started the conversation.",
+    #     update.message.message_thread_id,
+    # )
+    chat_type = update.message.chat.type
+    logger.info("User %s started the conversation.", chat_type)
 
     symbol = context.args[0]
     try:
@@ -231,6 +272,7 @@ def main() -> None:
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             CommandHandler("t", ticker_command),
+            CommandHandler("select", select_room),
         ],
         states={
             BUTTONS: [
