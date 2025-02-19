@@ -70,34 +70,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
-# not in use
-async def select_room(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_type = update.message.chat.type
-    if chat_type == "supergroup":
-        chat_id = update.message.chat.id
-        thread_id = update.message.message_thread_id
-
-        entry = {chat_id: thread_id}
-
-        with open("selected_room.json", "r+") as f:
-            file_data = json.load(f)
-            entry_key = list(entry.items())
-            rooms_ids_lst = []
-            for i in file_data["supergroup_thread_id"]:
-                rooms_ids_lst.append(list(i.items())[0][0])
-            if str(entry_key[0][0]) in rooms_ids_lst:
-                print("yesss", entry_key[0][0])
-            else:
-                print("nooo")
-                file_data["supergroup_thread_id"].append(entry)
-                f.seek(0)
-                json.dump(file_data, f, indent=4)
-
-        await update.message.reply_text("yes jap")
-    else:
-        await update.message.reply_text(chat_type)
-
-
 async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await context.bot.set_chat_menu_button()
