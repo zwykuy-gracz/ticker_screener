@@ -1,9 +1,12 @@
-import logging
 import os
+import html
 import json
+import logging
+import traceback
 import yfinance as yf
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -27,12 +30,6 @@ logger = logging.getLogger(__name__)
 y, BUTTONS = range(2)
 x, ABOUT, DVD, MOMENTUM, NEWS, DONE = range(6)
 
-with open("selected_room.json", "r+") as f:
-    file_data = json.load(f)
-    rooms_ids_lst = []
-    for i in file_data["supergroup_thread_id"]:
-        rooms_ids_lst.append(list(i.items())[0][0])
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Type /t [ticker] to get info")
@@ -42,6 +39,38 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("Use /start to test this bot.")
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(
+        None, context.error, context.error.__traceback__
+    )
+    tb_string = "".join(tb_list)
+
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+
+    # Finally, send the message
+    # chat_id=update.effective_chat.id, text=message, parse_mode=ParseMode.HTML
+    await context.bot.send_message(
+        chat_id=os.getenv("MY_ID"), text=message, parse_mode=ParseMode.HTML
+    )
+
+
+# not in use
 async def select_room(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_type = update.message.chat.type
     if chat_type == "supergroup":
@@ -107,10 +136,10 @@ async def about_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
+        message_thread_id=query.message.message_thread_id,
         text="About. Pick another one",
         reply_markup=reply_markup,
     )
-
     return BUTTONS
 
 
@@ -137,7 +166,8 @@ async def dvd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = build_keybord(symbol)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Last DVD. Pick another",
+        message_thread_id=query.message.message_thread_id,
+        text="Last DVD. Pick another one",
         reply_markup=reply_markup,
     )
 
@@ -149,19 +179,42 @@ async def news_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
     ticker = yf.Ticker(symbol)
 
+    date1 = datetime.fromisoformat(
+        ticker.news[0]["content"]["pubDate"].replace("Z", "+00:00")
+    )
+    dt1 = date1.strftime("%Y-%m-%d %H:%M:%S")
+    date2 = datetime.fromisoformat(
+        ticker.news[1]["content"]["pubDate"].replace("Z", "+00:00")
+    )
+    dt2 = date2.strftime("%Y-%m-%d %H:%M:%S")
+    date3 = datetime.fromisoformat(
+        ticker.news[2]["content"]["pubDate"].replace("Z", "+00:00")
+    )
+    dt3 = date3.strftime("%Y-%m-%d %H:%M:%S")
+
+    links = []
+    for i in range(3):
+        try:
+            links.append(ticker.news[i]["content"]["clickThroughUrl"]["url"])
+        except TypeError:
+            links.append(ticker.news[i]["content"]["canonicalUrl"]["url"])
+
     msg = (
         f"News for {ticker.info['longName']}:\n\n"
-        f"{ticker.news[0]['title']}\n"
-        f"Time published: {datetime.fromtimestamp(ticker.news[0]['providerPublishTime'])}\n"
-        f"Link: {ticker.news[0]['link']}\n"
+        f"Title: {ticker.news[0]['content']['title']}\n\n"
+        f"Summary: {ticker.news[0]['content']['summary']}\n\n"
+        f"Time published: {dt1}\n"
+        f"Link: {links[0]}\n"
         "----------------------------------------\n"
-        f"{ticker.news[1]['title']}\n"
-        f"Time published: {datetime.fromtimestamp(ticker.news[1]['providerPublishTime'])}\n"
-        f"Link: {ticker.news[1]['link']}\n"
+        f"Title: {ticker.news[1]['content']['title']}\n\n"
+        f"Summary: {ticker.news[1]['content']['summary']}\n\n"
+        f"Time published: {dt2}\n"
+        f"Link: {links[1]}\n"
         "----------------------------------------\n"
-        f"{ticker.news[2]['title']}\n"
-        f"Time published: {datetime.fromtimestamp(ticker.news[2]['providerPublishTime'])}\n"
-        f"Link: {ticker.news[2]['link']}"
+        f"Title: {ticker.news[2]['content']['title']}\n\n"
+        f"Summary: {ticker.news[2]['content']['summary']}\n\n"
+        f"Time published: {dt3}\n"
+        f"Link: {links[2]}"
     )
     await query.answer()
 
@@ -170,6 +223,7 @@ async def news_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=msg)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
+        message_thread_id=query.message.message_thread_id,
         text="Company news. Pick another one",
         reply_markup=reply_markup,
     )
@@ -178,6 +232,7 @@ async def news_company(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def momentum(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # logger.info("User %s started the conversation.", update)
     query = update.callback_query
     symbol = query.message.reply_markup.inline_keyboard[0][0].text.split()[1][1:]
     ticker = yf.Ticker(symbol)
@@ -188,7 +243,7 @@ async def momentum(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hist_12mo = ticker.history(period="1y").iloc[0]["Open"].round(2)
     hist_YTD = ticker.history(period="ytd").iloc[0]["Open"].round(2)
     current_price = ticker.info["currentPrice"]
-    msg = f"""{ticker.info['longName']} momentum\n
+    msg = f"""{ticker.info['longName']} ${current_price}\nMomentum\n
         1 month return: {((current_price / hist_1mo - 1) * 100).round(2)}%\n
         3 months return: {((current_price / hist_3mo - 1) * 100).round(2)}%\n
         6 months return: {((current_price / hist_6mo - 1) * 100).round(2)}%\n
@@ -204,10 +259,10 @@ async def momentum(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=msg)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
+        message_thread_id=query.message.message_thread_id,
         text="Momentum. Pick another one",
         reply_markup=reply_markup,
     )
-
     return BUTTONS
 
 
@@ -219,49 +274,53 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-# drukuje guziki /t
+# prints buttons /t
 async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # user = update.message.from_user
-    # logger.info(
-    #     "update.message.chat.id %s started the conversation.", update.message.chat.id
-    # )
-    # logger.info(
-    #     "update.message.message_thread_id %s started the conversation.",
-    #     update.message.message_thread_id,
-    # )
+    logger.info("User %s started the conversation.", update)
     chat_type = update.message.chat.type
-    logger.info("User %s started the conversation.", chat_type)
+    chat_id = update.message.chat.id
+    thread_id = update.message.message_thread_id
 
-    symbol = context.args[0]
-    try:
-        ticker = yf.Ticker(symbol.upper())
-        daily_prec_change = (
-            (ticker.info["currentPrice"] - ticker.info["previousClose"])
-            / ticker.info["previousClose"]
-            * 100
-        )
-        basic_info = f"""${symbol.upper()} {ticker.info['longName']}\n
-        Current Price: ${ticker.info['currentPrice']}, {round(daily_prec_change, 2)}%\n
-        Market Cap: ${ticker.info['marketCap']:_}\n
-        52 Week High: ${ticker.info['fiftyTwoWeekHigh']}\n
-        52 Week Low: ${ticker.info['fiftyTwoWeekLow']}\n
-        52 Change: ${round(ticker.info['52WeekChange']*100,2)}\n
-        Volume: {ticker.info['volume']:_}\n
-        Average Volume: {ticker.info['averageVolume']:_}"""
+    with open("selected_room.json", "r+") as f:
+        data = json.load(f)
+    if (
+        chat_type == "private"
+        or str(chat_id) in data
+        and thread_id == data[str(chat_id)]
+    ):
 
-        reply_markup = build_keybord(symbol)
+        symbol = context.args[0]
+        try:
+            ticker = yf.Ticker(symbol.upper())
+            daily_prec_change = (
+                (ticker.info["currentPrice"] - ticker.info["previousClose"])
+                / ticker.info["previousClose"]
+                * 100
+            )
+            basic_info = f"""${symbol.upper()} {ticker.info['longName']}\n
+            Current Price: ${ticker.info['currentPrice']}, {round(daily_prec_change, 2)}%\n
+            Market Cap: ${ticker.info['marketCap']:_}\n
+            52 Week High: ${ticker.info['fiftyTwoWeekHigh']}\n
+            52 Week Low: ${ticker.info['fiftyTwoWeekLow']}\n
+            52 Change: ${round(ticker.info['52WeekChange']*100,2)}\n
+            Volume: {ticker.info['volume']:_}\n
+            Average Volume: {ticker.info['averageVolume']:_}"""
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id, text=basic_info
-        )
+            reply_markup = build_keybord(symbol)
 
-        await update.message.reply_text(
-            text="Basic info. Pick one", reply_markup=reply_markup
-        )
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                message_thread_id=update.message.message_thread_id,
+                text=basic_info,
+            )
 
-        return BUTTONS
-    except KeyError:
-        await update.message.reply_text("ogarnij się!")
+            await update.message.reply_text(
+                text="Basic info. Pick one", reply_markup=reply_markup
+            )
+
+            return BUTTONS
+        except KeyError:
+            await update.message.reply_text("Bad ticker. Try again")
 
 
 def main() -> None:
@@ -272,7 +331,6 @@ def main() -> None:
             CommandHandler("start", start),
             CommandHandler("help", help_command),
             CommandHandler("t", ticker_command),
-            CommandHandler("select", select_room),
         ],
         states={
             BUTTONS: [
@@ -284,8 +342,11 @@ def main() -> None:
             ]
         },
         fallbacks=[CommandHandler("start", start)],
+        conversation_timeout=40,
     )
     application.add_handler(conv_handler)
+
+    application.add_error_handler(error_handler)
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

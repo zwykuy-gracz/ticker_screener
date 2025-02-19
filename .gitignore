@@ -1,4 +1,8 @@
-env
+/env
 .env
 *.log
+*.json
+*.pyc
 test.py
+
+json_test.py
