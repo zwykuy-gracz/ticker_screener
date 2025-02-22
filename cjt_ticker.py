@@ -313,7 +313,7 @@ def main() -> None:
                 CallbackQueryHandler(done, pattern="^" + str(DONE) + "$"),
             ]
         },
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[CommandHandler("start", start), CommandHandler("t", ticker_command)],
         conversation_timeout=40,
     )
     application.add_handler(conv_handler)
