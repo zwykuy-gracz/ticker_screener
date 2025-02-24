@@ -253,6 +253,13 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     thread_id = update.message.message_thread_id
 
+    with open("counter.txt", "r") as f:
+        count = f.read()
+
+    with open("counter.txt", "w") as f:
+        new_count = int(count) + 1
+        f.write(str(new_count))
+
     with open("selected_room.json", "r+") as f:
         data = json.load(f)
     if (
