@@ -267,10 +267,10 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         or str(chat_id) in data
         and thread_id == data[str(chat_id)]
     ):
-
         symbol = context.args[0]
+        ticker = yf.Ticker(symbol.upper())
+
         try:
-            ticker = yf.Ticker(symbol.upper())
             daily_prec_change = (
                 (ticker.info["currentPrice"] - ticker.info["previousClose"])
                 / ticker.info["previousClose"]
@@ -298,7 +298,10 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             return BUTTONS
+
         except KeyError:
+            await update.message.reply_text("Bad ticker. Try again")
+        except IndexError:
             await update.message.reply_text("Bad ticker. Try again")
 
 
@@ -320,7 +323,7 @@ def main() -> None:
                 CallbackQueryHandler(done, pattern="^" + str(DONE) + "$"),
             ]
         },
-        fallbacks=[CommandHandler("start", start), CommandHandler("t", ticker_command)],
+        fallbacks=[CommandHandler("t", ticker_command), CommandHandler("start", start)],
         conversation_timeout=40,
     )
     application.add_handler(conv_handler)
